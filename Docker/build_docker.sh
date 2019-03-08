@@ -2,5 +2,5 @@
 
 VERSION=`cat VERSION.txt`
 
-docker build -t trinityrnaseq/trinityrnaseq:${VERSION} .
-docker build -t trinityrnaseq/trinityrnaseq:latest .
+docker build -t trinityctat/genomeguidedreco:${VERSION} .
+docker build -t trinityctat/genomeguidedreco:latest .
