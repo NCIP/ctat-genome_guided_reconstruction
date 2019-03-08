@@ -35,21 +35,23 @@ def main():
     required = arg_parser.add_argument_group('required arguments')
     optional = arg_parser.add_argument_group('optional arguments')
     
-    required.add_argument("--left_fq", dest="left_fq_filename", type=str, required=True, default=None,
+    required.add_argument("--left_fq", dest="left_fq", type=str, required=True, default=None,
                           help="left (or single) fastq file")
     
-    required.add_argument("--right_fq", dest="right_fq_filename", type=str, required=False, default="",
+    required.add_argument("--right_fq", dest="right_fq", type=str, required=False, default="",
                           help="right fastq file (optional)")
     
     optional.add_argument("--genome_lib_dir", dest="genome_lib_dir", type=str, default=os.environ.get('CTAT_GENOME_LIB'),
                           help="genome lib directory - see http://FusionFilter.github.io for details.  Uses env var CTAT_GENOME_LIB as default")
     
-    optional.add_argument("--out_dir", dest="str_out_dir", type=str, required=False, default="star_stringtie", help="output directory")
+    optional.add_argument("--out_dir", dest="out_dir", type=str, required=False, default="star_stringtie", help="output directory")
     
-    optional.add_argument("--out_prefix", dest="out_prefix", type=str, default='finspector', help="output filename prefix")
+    optional.add_argument("--out_prefix", dest="out_prefix", type=str, default='sample', help="output filename prefix (ie. sample name")
 
     optional.add_argument("--CPU", dest="CPU", required=False, type=int, default=4,
                           help="number of threads for multithreaded processes")
+
+    optional.add_argument("--stringtie_incl_ref_annot", action='store_true', default=False, help="include reference annotation as guide for stringtie")
     
     args_parsed = arg_parser.parse_args()
 
@@ -62,15 +64,13 @@ def main():
     
     genome_lib_dir = os.path.abspath(genome_lib_dir)
     
-    args_parsed.gtf_filename = os.path.sep.join([genome_lib_dir, "ref_annot.gtf"])
-    args_parsed.genome_fasta_filename = os.path.sep.join([genome_lib_dir, "ref_genome.fa"])
-    
-    args_parsed.left_fq_filename = os.path.abspath(args_parsed.left_fq_filename)
-    check_files_exist( [ args_parsed.left_fq_filename ])
+            
+    args_parsed.left_fq = os.path.abspath(args_parsed.left_fq)
+    check_files_exist( [ args_parsed.left_fq ])
                                                    
-    if args_parsed.right_fq_filename:
-        args_parsed.right_fq_filename = os.path.abspath(args_parsed.right_fq_filename)
-        check_files_exist( [ args_parsed.right_fq_filename ])
+    if args_parsed.right_fq:
+        args_parsed.right_fq = os.path.abspath(args_parsed.right_fq)
+        check_files_exist( [ args_parsed.right_fq ])
 
 
     if not os.path.exists(args_parsed.out_dir):
@@ -88,17 +88,42 @@ def main():
                    " --outReadsUnmapped None " +
                    " --runThreadN {} ".format(args_parsed.CPU) +
                    " --outSAMstrandField intronMotif " +
-                   " --limitBAMsortRAM $STAR_limitBAMsortRAM 40G" +
+                   " --limitBAMsortRAM {}".format(40 * 1024**3) +  # use 40 G
                    " --outSAMtype BAM SortedByCoordinate " +
                    " --genomeLoad NoSharedMemory " +
-                   " --twopassMode Basic {} {}".format(args_parsed.left_fq, args_parsed.right_fq) )
-
+                   " --twopassMode Basic " +
+                   " --readFilesIn {} {}".format(args_parsed.left_fq, args_parsed.right_fq) )
+    
+    if re.search(".gz$", args_parsed.left_fq) is not None: 
+        star_cmd = star_cmd + " --readFilesCommand 'gunzip -c' "
+        
+    
     pipeliner.add_commands([Command(star_cmd, "star_align.ok")])
+
+    # rename according to the sample name
+
+    target_bam_filename = "{}.Aligned.sortedByCoord.out.bam".format(args_parsed.out_prefix)
+    cmd = "mv Aligned.sortedByCoord.out.bam {}".format(target_bam_filename)
+
+    pipeliner.add_commands([Command(cmd, "renamed_bam.ok")])
+
     
     ## run Stringtie
-    
-    
 
+    stringtie_gtf = "{}.stringtie.gtf".format(args_parsed.out_prefix)
+    stringtie_cmd = "stringtie {} -o {}".format(target_bam_filename, stringtie_gtf)
+    stringtie_chkpt = "stringtie.ok"
+    if args_parsed.stringtie_incl_ref_annot:
+        ref_annot_gtf_filename = os.path.sep.join([genome_lib_dir, "ref_annot.gtf"])
+        stringtie_gtf = "{}.stringtie.incRefAnnot.gtf".format(args_parsed.out_prefix)
+        stringtie_cmd = "stringtie {} -G {} -o {}".format(target_bam_filename, ref_annot_gtf_filename, stringtie_gtf)
+        stringtie_chkpt = "stringtie.incRefAnnot.ok"
+
+    pipeliner.add_commands([Command(stringtie_cmd, stringtie_chkpt)])
+    
+    
+    
+    pipeliner.run()
     
     exit(0)
 
